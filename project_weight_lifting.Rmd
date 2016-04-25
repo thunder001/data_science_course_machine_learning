@@ -1,0 +1,123 @@
+---
+title: "Evaluation of Weight Lifting Performance Using Maching Learning"
+author: "Chunlei Zheng"
+date: "April 23, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Overview
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, I use maching learning to evaluate weight lifting exercise performance. Data were collected from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. After proper data cleaning, data was fitted using multiple models incluing LDA, SVM and randomforest. Randomforest was chosen as best model and also used to predict test data. 
+
+## Loading required packages
+```{r}
+library(caret)
+```
+## Data loading and exploring 
+```{r}
+dat <- read.csv("/Users/zhengc/Learning/Datascience/maching_learning/pml-training.csv", stringsAsFactors = FALSE)
+dim(dat)
+sum(is.na(dat))
+```
+From this simple data exploration, we can see there are lots of NAs.  Therefore, we need to perform proper data cleaning. 
+
+## Data cleaning
+```{r}
+dat <- dat[dat$new_window=="no", -c(1:7)] # Remove non-related rows and columes
+```
+### Remove NA predictors
+```{r}
+# naVars function computes columes that contain more than 90% NA value
+naVars <- function(df) {
+  vars <- numeric()
+  for (i in 1:ncol(df)) {
+    if (sum(is.na(df[,i])) > 0.9 * nrow(df)) {
+      vars <- c(vars, i)
+    }
+  }
+  vars
+}
+
+navars <- naVars(dat) # label NA columes of dat1
+dat <- dat[,-navars] # remove NA columes
+```
+
+### Remove zero variant predictors
+```{r}
+library(caret)
+zerovars <- nearZeroVar(dat) 
+dat <- dat[, -zerovars]
+
+```
+### Examine colinearity of predictors
+```{r}
+M <- abs(cor(dat[, -53]))
+diag(M) <- 0
+corvars <- which(M > 0.8)
+c(colinear_predictor=length(corvars)/2)
+```
+From colinearity analysis, we see there are 19 of 52 predictors are highly colinear, which will affect modeling accuracy or viarance if we include all predictors, we need to consider this when building models.
+
+## Model building and evaluation
+### Data slicing
+Because we have lots of observations, this data was split into training and testing datset
+```{r}
+intrain <- createDataPartition(dat$classe, p=3/4, list=FALSE)
+training <- dat[intrain,]
+testing <- dat[-intrain,]
+c(training=nrow(training),testing=nrow(testing))
+```
+
+Then, I tried to using several machine learning techniques to build model. 10 fold cross-valication and test dataset were using to evaluate each model. Due to high co-linearity of predictors I detected before, PCA procedure was used to preprocess data to reduce noise.
+
+### Training control
+```{r}
+tc <- trainControl(method="cv",number=10, verboseIter=FALSE,preProcOptions="pca", allowParallel=TRUE)
+```
+### Build lda model and evaluation
+```{r}
+lda.fit <- train(classe~., data=training, method="lda",trainControl=tc )
+lda.pred <- predict(lda.fit, testing)
+confusionMatrix(lda.pred, testing$classe)$overall
+```
+
+### Build svm model and evaluation
+```{r}
+oldw <- getOption("warn")
+options(warn=-1)
+svm.fit <- train(classe~., data=training, method="svmLinear", trainControl=tc)
+svm.pred <- predict(svm.fit, testing)
+confusionMatrix(svm.pred, testing$classe)$overall
+```
+
+### Bulid randomforest model and evaluation
+```{r}
+rf.fit <- train(classe~., data=training, method="rf", importance=TRUE, trainControl=tc)
+rf.pred <- predict(rf.fit, testing)
+confusionMatrix(rf.pred, testing$classe)$overall
+```
+
+### Compare models
+```{r}
+Model <- c("lda", "svm", "rf")
+Accuracy <- c(lda.fit$result[1,2], svm.fit$result[1,2], rf.fit$result[1, 2])
+Kappa <- c(lda.fit$result[1,3], svm.fit$result[1,3], rf.fit$result[1,3])
+modelscomp <- as.data.frame(cbind(Model, Accuracy, Kappa))
+modelscomp
+```
+
+## Conclusion and prediction
+Based on model comparasion among three models, lda, svm and randomforest, rf is chosen as best model in terms of accuracy and kappa value for the training data. Therefore, we use rf mode to predict provided test data. I also output the important predictors from randomforest fit. 
+```{r}
+varImp(rf.fit)
+testing2 <- read.csv("/Users/zhengc/Learning/Datascience/maching_learning/pml-testing.csv", stringsAsFactors = FALSE)
+rf.pred2 <- predict(rf.fit, testing2)
+rf.pred2
+```
+
+## Reference
+http://groupware.les.inf.puc-rio.br/har
